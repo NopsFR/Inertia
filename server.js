@@ -2,26 +2,107 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const mongoose = require('mongoose');
 
 const ROOT = __dirname;
-const STORE = path.join(ROOT, 'data', 'site.json');
 const ADMIN_PASSWORD = process.env.INERTIA_ADMIN_PASSWORD;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inertia';
 const PORT = Number(process.env.PORT || 3000);
+
 if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
   console.error('Set INERTIA_ADMIN_PASSWORD to a unique password of at least 12 characters.');
   process.exit(1);
 }
 
+// ── MongoDB connection ──────────────────────────────────────────────────
+mongoose.connect(MONGO_URI).then(() => console.log('MongoDB connected')).catch(err => { console.error('MongoDB connection error:', err.message); process.exit(1); });
+
+// ── Mongoose model ──────────────────────────────────────────────────────
+const siteSchema = new mongoose.Schema({
+  hero: {
+    title: { type: String, default: 'Move faster.' },
+    highlight: { type: String, default: 'Play smarter.' },
+    description: { type: String, default: '' },
+    image: { type: String, default: '' }
+  },
+  products: [{
+    id: Number,
+    name: String,
+    game: String,
+    price: Number,
+    currency: { type: String, enum: ['USD', 'EUR'], default: 'USD' },
+    stock: { type: String, enum: ['IN STOCK', 'OUT OF STOCK'], default: 'IN STOCK' },
+    rating: { type: Number, min: 0, max: 5, default: 5 },
+    reviews: { type: Number, default: 0 },
+    description: String,
+    image: String
+  }]
+}, { timestamps: true });
+
+const Site = mongoose.model('Site', siteSchema);
+
+// ── Seed default data if collection is empty ────────────────────────────
+async function seedIfEmpty() {
+  const count = await Site.countDocuments();
+  if (count > 0) return;
+  const defaultData = {
+    hero: {
+      title: 'Move faster.',
+      highlight: 'Play smarter.',
+      description: 'A refined marketplace for the tools and access you need.',
+      image: ''
+    },
+    products: [
+      { id: 1, name: 'Roblox Executors', game: 'ROBLOX', price: 2.99, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 214, description: 'Premium Roblox executors — undetected, powerful, and easy to use. Pick your executor.', image: '' },
+      { id: 2, name: 'Roblox Scripts', game: 'ROBLOX', price: 4.99, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 300, description: 'Premium scripts for the most popular Roblox games. Pick your game to see which scripts support it.', image: '' },
+      { id: 3, name: 'Fallen Survival Account', game: 'ROBLOX', price: 1.99, currency: 'USD', stock: 'OUT OF STOCK', rating: 5, reviews: 156, description: 'Roblox accounts with access to the game Fallen Survival. Unverified, aged, multiple variants available.', image: '' },
+      { id: 4, name: 'Matcha External', game: 'ROBLOX', price: 11.97, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 58, description: 'Premium Roblox external. Silent aim, full ESP, triggerbot and advanced visuals. Lifetime access.', image: '' },
+      { id: 5, name: 'Ignite Script', game: 'ROBLOX', price: 4.99, currency: 'USD', stock: 'IN STOCK', rating: 4.9, reviews: 321, description: 'The ultimate undetected script for Fallen Survival and Havoc. Silent Aim • Wallbang • Hitscan • ESP and much more.', image: '' },
+      { id: 6, name: 'Serversiding', game: 'ROBLOX', price: 15, currency: 'EUR', stock: 'IN STOCK', rating: 5, reviews: 132, description: 'The best web-based Roblox serverside executor. 600+ scripts straight from your browser, no download needed.', image: '' },
+      { id: 7, name: 'Xtools Roblox Multi Tool', game: 'ROBLOX', price: 19.99, currency: 'USD', stock: 'IN STOCK', rating: 4.9, reviews: 189, description: '30+ specialized tools to automate Roblox functions. No recurring fees.', image: '' },
+      { id: 8, name: 'Neverlose CS2', game: 'CS2', price: 31, currency: 'EUR', stock: 'IN STOCK', rating: 5, reviews: 48, description: 'Premium CS2 internal cheat from Neverlose. Instant key delivery, redeem with your Neverlose username.', image: '' }
+    ]
+  };
+  await Site.create(defaultData);
+  console.log('Seeded default site data into MongoDB.');
+}
+
+// ── In-memory sessions & rate‑limiting ──────────────────────────────────
 const sessions = new Map();
 const attempts = new Map();
-const readStore = () => JSON.parse(fs.readFileSync(STORE, 'utf8'));
-let storeCache = readStore();
-const writeStore = data => { fs.writeFileSync(STORE, JSON.stringify(data, null, 2), { mode: 0o600 }); storeCache = data; };
-const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+const readStore = async () => {
+  let doc = await Site.findOne();
+  if (!doc) { await seedIfEmpty(); doc = await Site.findOne(); }
+  return doc.toObject();
+};
+
+const writeStore = async (data) => {
+  await Site.updateOne({}, { hero: data.hero, products: data.products }, { upsert: true });
+};
+
+const json = (res, status, data) => {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.end(JSON.stringify(data));
+};
+
 const cookie = req => Object.fromEntries((req.headers.cookie || '').split(';').map(x => x.trim().split('=').map(decodeURIComponent)).filter(x => x[0]));
-const isAdmin = req => { const token = cookie(req).inertia_session; const s = token && sessions.get(token); return !!(s && s.expires > Date.now()); };
-const body = req => new Promise((resolve, reject) => { let raw=''; req.on('data', c => { raw += c; if (raw.length > 2_500_000) req.destroy(); }); req.on('end', () => { try { resolve(JSON.parse(raw || '{}')); } catch { reject(new Error('Invalid JSON')); } }); });
+
+const isAdmin = req => {
+  const token = cookie(req).inertia_session;
+  const s = token && sessions.get(token);
+  return !!(s && s.expires > Date.now());
+};
+
+const body = req => new Promise((resolve, reject) => {
+  let raw = '';
+  req.on('data', c => { raw += c; if (raw.length > 2_500_000) req.destroy(); });
+  req.on('end', () => { try { resolve(JSON.parse(raw || '{}')); } catch { reject(new Error('Invalid JSON')); } });
+});
+
 const cleanText = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+
 function validate(data) {
   if (!data || !Array.isArray(data.products) || data.products.length > 60) throw new Error('Invalid products.');
   const hero = data.hero || {};
@@ -32,25 +113,93 @@ function validate(data) {
     products: data.products.map((p, i) => ({ id: Number.isInteger(p.id) ? p.id : i + 1, name: cleanText(p.name, 80), game: cleanText(p.game, 30), price: Number(p.price) || 0, currency: p.currency === 'EUR' ? 'EUR' : 'USD', stock: p.stock === 'OUT OF STOCK' ? 'OUT OF STOCK' : 'IN STOCK', rating: Math.min(5, Math.max(0, Number(p.rating) || 5)), reviews: Math.max(0, Math.floor(Number(p.reviews) || 0)), description: cleanText(p.description, 380), image: cleanText(p.image, 2_000_000) })).filter(p => p.name && p.game)
   };
 }
-function auth(req, res) { if (!isAdmin(req)) { json(res, 401, { error: 'Authentication required.' }); return false; } return true; }
+
+function auth(req, res) {
+  if (!isAdmin(req)) { json(res, 401, { error: 'Authentication required.' }); return false; }
+  return true;
+}
+
+// ── HTTP Server ─────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const baseHeaders = { 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'" };
-  Object.entries(baseHeaders).forEach(([k,v]) => res.setHeader(k,v));
-  if (url.pathname === '/api/public' && req.method === 'GET') return json(res, 200, storeCache);
-  if (url.pathname === '/api/auth/me' && req.method === 'GET') return json(res, 200, { authenticated: isAdmin(req) });
-  if (url.pathname === '/api/auth/login' && req.method === 'POST') {
-    const ip = req.socket.remoteAddress || 'unknown', record = attempts.get(ip) || { count: 0, reset: Date.now() + 600000 };
-    if (record.reset < Date.now()) { record.count = 0; record.reset = Date.now() + 600000; }
-    if (record.count >= 8) return json(res, 429, { error: 'Too many login attempts. Try again later.' });
-    try { const { password } = await body(req); const ok = typeof password === 'string' && password.length === ADMIN_PASSWORD.length && crypto.timingSafeEqual(Buffer.from(password), Buffer.from(ADMIN_PASSWORD)); if (!ok) { record.count++; attempts.set(ip, record); return json(res, 401, { error: 'Invalid credentials.' }); }
-      attempts.delete(ip); const token = crypto.randomBytes(32).toString('base64url'); sessions.set(token, { expires: Date.now() + 1000*60*60*8 }); res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`); return json(res, 200, { ok: true });
-    } catch { return json(res, 400, { error: 'Invalid request.' }); }
+  const baseHeaders = {
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'"
+  };
+  Object.entries(baseHeaders).forEach(([k, v]) => res.setHeader(k, v));
+
+  try {
+    if (url.pathname === '/api/public' && req.method === 'GET') {
+      return json(res, 200, await readStore());
+    }
+
+    if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+      return json(res, 200, { authenticated: isAdmin(req) });
+    }
+
+    if (url.pathname === '/api/auth/login' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress || 'unknown';
+      const record = attempts.get(ip) || { count: 0, reset: Date.now() + 600000 };
+      if (record.reset < Date.now()) { record.count = 0; record.reset = Date.now() + 600000; }
+      if (record.count >= 8) return json(res, 429, { error: 'Too many login attempts. Try again later.' });
+      try {
+        const { password } = await body(req);
+        const ok = typeof password === 'string' && password.length === ADMIN_PASSWORD.length && crypto.timingSafeEqual(Buffer.from(password), Buffer.from(ADMIN_PASSWORD));
+        if (!ok) { record.count++; attempts.set(ip, record); return json(res, 401, { error: 'Invalid credentials.' }); }
+        attempts.delete(ip);
+        const token = crypto.randomBytes(32).toString('base64url');
+        sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8 });
+        res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+        return json(res, 200, { ok: true });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
+    }
+
+    if (url.pathname === '/api/auth/logout' && req.method === 'POST') {
+      const token = cookie(req).inertia_session;
+      if (token) sessions.delete(token);
+      res.setHeader('Set-Cookie', 'inertia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+      return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname === '/api/admin/state' && req.method === 'GET') {
+      if (!auth(req, res)) return;
+      return json(res, 200, await readStore());
+    }
+
+    if (url.pathname === '/api/admin/state' && req.method === 'PUT') {
+      if (!auth(req, res)) return;
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) {
+        return json(res, 403, { error: 'Invalid origin.' });
+      }
+      try {
+        const state = validate(await body(req));
+        await writeStore(state);
+        return json(res, 200, state);
+      } catch (e) {
+        return json(res, 400, { error: e.message || 'Unable to save.' });
+      }
+    }
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return json(res, 404, { error: 'Not found.' });
+    }
+
+    return fs.readFile(path.join(ROOT, 'index.html'), (err, file) => {
+      if (err) return json(res, 500, { error: 'Application unavailable.' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.end(file);
+    });
+  } catch (e) {
+    console.error('Server error:', e);
+    json(res, 500, { error: 'Internal server error.' });
   }
-  if (url.pathname === '/api/auth/logout' && req.method === 'POST') { const token = cookie(req).inertia_session; if (token) sessions.delete(token); res.setHeader('Set-Cookie', 'inertia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'); return json(res, 200, { ok: true }); }
-  if (url.pathname === '/api/admin/state' && req.method === 'GET') { if (!auth(req,res)) return; return json(res, 200, storeCache); }
-  if (url.pathname === '/api/admin/state' && req.method === 'PUT') { if (!auth(req,res)) return; if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) return json(res, 403, { error: 'Invalid origin.' }); try { const state = validate(await body(req)); writeStore(state); return json(res, 200, state); } catch (e) { return json(res, 400, { error: e.message || 'Unable to save.' }); } }
-  if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 404, { error: 'Not found.' });
-  return fs.readFile(path.join(ROOT, 'index.html'), (err, file) => { if (err) return json(res,500,{error:'Application unavailable.'}); res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'}); res.end(file); });
 });
-server.listen(PORT, () => console.log(`Inertia running at http://localhost:${PORT}`));
+
+// ── Start ───────────────────────────────────────────────────────────────
+mongoose.connection.once('open', () => {
+  seedIfEmpty().then(() => {
+    server.listen(PORT, () => console.log(`Inertia running at http://localhost:${PORT}`));
+  });
+});
