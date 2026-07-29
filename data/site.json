@@ -1,0 +1,18 @@
+{
+  "hero": {
+    "title": "Move faster.",
+    "highlight": "Play smarter.",
+    "description": "Inertia is a refined marketplace for the tools and access you need—delivered through a focused, modern experience.",
+    "image": ""
+  },
+  "products": [
+    {"id":1,"name":"Roblox Executors","game":"ROBLOX","price":2.99,"currency":"USD","stock":"IN STOCK","rating":5,"reviews":214,"description":"Premium Roblox executors — undetected, powerful, and easy to use. Pick your executor.","image":""},
+    {"id":2,"name":"Roblox Scripts","game":"ROBLOX","price":4.99,"currency":"USD","stock":"IN STOCK","rating":5,"reviews":300,"description":"Premium scripts for the most popular Roblox games. Pick your game to see which scripts support it.","image":""},
+    {"id":3,"name":"Fallen Survival Account","game":"ROBLOX","price":1.99,"currency":"USD","stock":"OUT OF STOCK","rating":5,"reviews":156,"description":"Roblox accounts with access to the game Fallen Survival. Unverified, aged, multiple variants available.","image":""},
+    {"id":4,"name":"Matcha External","game":"ROBLOX","price":11.97,"currency":"USD","stock":"IN STOCK","rating":5,"reviews":58,"description":"Premium Roblox external. Silent aim, full ESP, triggerbot and advanced visuals. Lifetime access.","image":""},
+    {"id":5,"name":"Ignite Script","game":"ROBLOX","price":4.99,"currency":"USD","stock":"IN STOCK","rating":4.9,"reviews":321,"description":"The ultimate undetected script for Fallen Survival and Havoc. Silent Aim • Wallbang • Hitscan • ESP and much more.","image":""},
+    {"id":6,"name":"Serversiding","game":"ROBLOX","price":15,"currency":"EUR","stock":"IN STOCK","rating":5,"reviews":132,"description":"The best web-based Roblox serverside executor. 600+ scripts straight from your browser, no download needed.","image":""},
+    {"id":7,"name":"Xtools Roblox Multi Tool","game":"ROBLOX","price":19.99,"currency":"USD","stock":"IN STOCK","rating":4.9,"reviews":189,"description":"30+ specialized tools to automate Roblox functions. No recurring fees.","image":""},
+    {"id":8,"name":"Neverlose CS2","game":"CS2","price":31,"currency":"EUR","stock":"IN STOCK","rating":5,"reviews":48,"description":"Premium CS2 internal cheat from Neverlose. Instant key delivery, redeem with your Neverlose username.","image":""}
+  ]
+}
