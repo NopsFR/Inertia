@@ -1,3 +1,6 @@
+const dns = require('node:dns');
+dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+
 const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
