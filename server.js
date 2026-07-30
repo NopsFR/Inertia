@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const ROOT = __dirname;
 const STORE = path.join(ROOT, 'data', 'site.json');
 const ADMIN_PASSWORD = process.env.INERTIA_ADMIN_PASSWORD;
+const SECRET_KEY = process.env.INERTIA_SECRET_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = Number(process.env.PORT || 3000);
 
@@ -16,7 +17,6 @@ if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
 
 // ── Storage backend: MongoDB if available, else JSON file ───────────────
 let readStore, writeStore;
-
 let mongoose = null;
 let Site = null;
 
@@ -59,7 +59,6 @@ async function initMongoStore() {
 
     Site = mongoose.model('Site', siteSchema);
 
-    // Seed default data if collection is empty
     const count = await Site.countDocuments();
     if (count === 0) {
       const fileData = JSON.parse(fs.readFileSync(STORE, 'utf8'));
@@ -82,7 +81,6 @@ async function initMongoStore() {
 
     console.log('Using MongoDB store.');
     return true;
-
   } catch (e) {
     if (mongoose) console.warn('MongoDB unavailable, falling back to file store:', e.message);
     return initFileStore();
@@ -103,6 +101,12 @@ const cookie = req => Object.fromEntries((req.headers.cookie || '').split(';').m
 
 const isAdmin = req => {
   const token = cookie(req).inertia_session;
+  const s = token && sessions.get(token);
+  return !!(s && s.expires > Date.now());
+};
+
+const isOwner = req => {
+  const token = cookie(req).inertia_owner;
   const s = token && sessions.get(token);
   return !!(s && s.expires > Date.now());
 };
@@ -131,6 +135,11 @@ function auth(req, res) {
   return true;
 }
 
+function authOwner(req, res) {
+  if (!isOwner(req)) { json(res, 401, { error: 'Owner authentication required.' }); return false; }
+  return true;
+}
+
 // ── HTTP Server ─────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -138,7 +147,7 @@ const server = http.createServer(async (req, res) => {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'"
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; img-src 'self' data: https:; connect-src 'self'; font-src 'self' https://fonts.gstatic.com; base-uri 'self'; frame-ancestors 'none'"
   };
   Object.entries(baseHeaders).forEach(([k, v]) => res.setHeader(k, v));
 
@@ -148,7 +157,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/auth/me' && req.method === 'GET') {
-      return json(res, 200, { authenticated: isAdmin(req) });
+      return json(res, 200, { authenticated: isAdmin(req), owner: isOwner(req) });
     }
 
     if (url.pathname === '/api/auth/login' && req.method === 'POST') {
@@ -170,18 +179,46 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/auth/logout' && req.method === 'POST') {
       const token = cookie(req).inertia_session;
+      const otoken = cookie(req).inertia_owner;
       if (token) sessions.delete(token);
-      res.setHeader('Set-Cookie', 'inertia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+      if (otoken) sessions.delete(otoken);
+      res.setHeader('Set-Cookie', ['inertia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0', 'inertia_owner=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0']);
+      return json(res, 200, { ok: true });
+    }
+
+    // ── Owner / Secret key login ──────────────────────────────────────
+    if (url.pathname === '/api/auth/owner-login' && req.method === 'POST') {
+      if (!SECRET_KEY) return json(res, 403, { error: 'Secret key auth not configured on server.' });
+      const ip = req.socket.remoteAddress || 'unknown';
+      const record = attempts.get(ip + ':owner') || { count: 0, reset: Date.now() + 600000 };
+      if (record.reset < Date.now()) { record.count = 0; record.reset = Date.now() + 600000; }
+      if (record.count >= 6) return json(res, 429, { error: 'Too many attempts. Try again later.' });
+      try {
+        const { secret } = await body(req);
+        const ok = typeof secret === 'string' && secret.length === SECRET_KEY.length && crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(SECRET_KEY));
+        if (!ok) { record.count++; attempts.set(ip + ':owner', record); return json(res, 401, { error: 'Invalid secret key.' }); }
+        attempts.delete(ip + ':owner');
+        const token = crypto.randomBytes(32).toString('base64url');
+        sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 12, role: 'owner' });
+        res.setHeader('Set-Cookie', `inertia_owner=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+        return json(res, 200, { ok: true, role: 'owner' });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
+    }
+
+    if (url.pathname === '/api/auth/owner-logout' && req.method === 'POST') {
+      const token = cookie(req).inertia_owner;
+      if (token) sessions.delete(token);
+      res.setHeader('Set-Cookie', 'inertia_owner=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
       return json(res, 200, { ok: true });
     }
 
     if (url.pathname === '/api/admin/state' && req.method === 'GET') {
-      if (!auth(req, res)) return;
+      if (!auth(req, res) && !authOwner(req, res)) return;
       return json(res, 200, await readStore());
     }
 
     if (url.pathname === '/api/admin/state' && req.method === 'PUT') {
-      if (!auth(req, res)) return;
+      if (!auth(req, res) && !authOwner(req, res)) return;
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) {
         return json(res, 403, { error: 'Invalid origin.' });
       }
