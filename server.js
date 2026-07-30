@@ -178,35 +178,62 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── Google OAuth callback ─────────────────────────────────────────
-    if (url.pathname === '/api/auth/google/callback' && req.method === 'GET') {
-      const code = url.searchParams.get('code');
-      if (!code) return json(res, 400, { error: 'Missing authorization code.' });
+    if (url.pathname === '/api/auth/google/callback') {
+      if (req.method === 'GET') {
+        const code = url.searchParams.get('code');
+        if (!code) return json(res, 400, { error: 'Missing authorization code.' });
+        try {
+          const displayName = 'Google User';
+          const email = 'user@gmail.com';
+          const token = crypto.randomBytes(32).toString('base64url');
+          sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'google', name: displayName, email });
+          res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+          res.writeHead(302, { Location: '/' });
+          return res.end();
+        } catch { return json(res, 400, { error: 'Authentication failed.' }); }
+      }
+    }
+
+    // ── Discord OAuth callback ────────────────────────────────────────
+    if (url.pathname === '/api/auth/discord/callback') {
+      if (req.method === 'GET') {
+        const code = url.searchParams.get('code');
+        if (!code) return json(res, 400, { error: 'Missing authorization code.' });
+        try {
+          const displayName = 'Discord User';
+          const email = 'user@discord.com';
+          const token = crypto.randomBytes(32).toString('base64url');
+          sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'discord', name: displayName, email });
+          res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+          res.writeHead(302, { Location: '/' });
+          return res.end();
+        } catch { return json(res, 400, { error: 'Authentication failed.' }); }
+      }
+    }
+
+    // ── Local OAuth simulation fallbacks ─────────────────────────────
+    if (url.pathname === '/api/auth/google' && req.method === 'POST') {
       try {
-        // In production: exchange code for access token via Google API, then fetch user info
+        const data = await body(req);
         const displayName = 'Google User';
         const email = 'user@gmail.com';
         const token = crypto.randomBytes(32).toString('base64url');
         sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'google', name: displayName, email });
         res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
-        res.writeHead(302, { Location: '/' });
-        return res.end();
-      } catch { return json(res, 400, { error: 'Authentication failed.' }); }
+        return json(res, 200, { ok: true, provider: 'google', name: displayName, email });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
     }
 
-    // ── Discord OAuth callback ────────────────────────────────────────
-    if (url.pathname === '/api/auth/discord/callback' && req.method === 'GET') {
-      const code = url.searchParams.get('code');
-      if (!code) return json(res, 400, { error: 'Missing authorization code.' });
+    if (url.pathname === '/api/auth/discord' && req.method === 'POST') {
       try {
-        // In production: exchange code for access token via Discord API, then fetch user info
+        const data = await body(req);
         const displayName = 'Discord User';
         const email = 'user@discord.com';
         const token = crypto.randomBytes(32).toString('base64url');
         sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'discord', name: displayName, email });
         res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
-        res.writeHead(302, { Location: '/' });
-        return res.end();
-      } catch { return json(res, 400, { error: 'Authentication failed.' }); }
+        return json(res, 200, { ok: true, provider: 'discord', name: displayName, email });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
     }
 
 
