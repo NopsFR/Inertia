@@ -1,4 +1,5 @@
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -157,8 +158,47 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/auth/me' && req.method === 'GET') {
-      return json(res, 200, { authenticated: isAdmin(req), owner: isOwner(req) });
+      const sessionToken = cookie(req).inertia_session || cookie(req).inertia_owner;
+      const s = sessionToken && sessions.get(sessionToken);
+      return json(res, 200, {
+        authenticated: isAdmin(req) || isOwner(req),
+        owner: isOwner(req),
+        provider: s ? s.provider : null,
+        name: s ? s.name : null,
+        email: s ? s.email : null
+      });
     }
+
+    // ── Google OAuth simulation ───────────────────────────────────────
+    if (url.pathname === '/api/auth/google' && req.method === 'POST') {
+      try {
+        const { code } = await body(req);
+        // Simulate Google token exchange - in production, exchange code for real tokens
+        const displayName = 'Google User';
+        const email = 'user@gmail.com';
+        const avatar = 'G';
+        const token = crypto.randomBytes(32).toString('base64url');
+        sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'google', name: displayName, email, avatar });
+        res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+        return json(res, 200, { ok: true, provider: 'google', name: displayName, email, avatar });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
+    }
+
+    // ── Discord OAuth simulation ──────────────────────────────────────
+    if (url.pathname === '/api/auth/discord' && req.method === 'POST') {
+      try {
+        const { code } = await body(req);
+        // Simulate Discord token exchange
+        const displayName = 'Discord User';
+        const email = 'user@discord.com';
+        const avatar = 'D';
+        const token = crypto.randomBytes(32).toString('base64url');
+        sessions.set(token, { expires: Date.now() + 1000 * 60 * 60 * 8, provider: 'discord', name: displayName, email, avatar });
+        res.setHeader('Set-Cookie', `inertia_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+        return json(res, 200, { ok: true, provider: 'discord', name: displayName, email, avatar });
+      } catch { return json(res, 400, { error: 'Invalid request.' }); }
+    }
+
 
     if (url.pathname === '/api/auth/login' && req.method === 'POST') {
       const ip = req.socket.remoteAddress || 'unknown';
