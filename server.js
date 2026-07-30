@@ -2,11 +2,11 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const mongoose = require('mongoose');
 
 const ROOT = __dirname;
+const STORE = path.join(ROOT, 'data', 'site.json');
 const ADMIN_PASSWORD = process.env.INERTIA_ADMIN_PASSWORD;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/inertia';
+const MONGO_URI = process.env.MONGO_URI;
 const PORT = Number(process.env.PORT || 3000);
 
 if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
@@ -14,74 +14,86 @@ if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
   process.exit(1);
 }
 
-// ── MongoDB connection ──────────────────────────────────────────────────
-mongoose.connect(MONGO_URI).then(() => console.log('MongoDB connected')).catch(err => { console.error('MongoDB connection error:', err.message); process.exit(1); });
+// ── Storage backend: MongoDB if available, else JSON file ───────────────
+let readStore, writeStore;
 
-// ── Mongoose model ──────────────────────────────────────────────────────
-const siteSchema = new mongoose.Schema({
-  hero: {
-    title: { type: String, default: 'Move faster.' },
-    highlight: { type: String, default: 'Play smarter.' },
-    description: { type: String, default: '' },
-    image: { type: String, default: '' }
-  },
-  products: [{
-    id: Number,
-    name: String,
-    game: String,
-    price: Number,
-    currency: { type: String, enum: ['USD', 'EUR'], default: 'USD' },
-    stock: { type: String, enum: ['IN STOCK', 'OUT OF STOCK'], default: 'IN STOCK' },
-    rating: { type: Number, min: 0, max: 5, default: 5 },
-    reviews: { type: Number, default: 0 },
-    description: String,
-    image: String
-  }]
-}, { timestamps: true });
+let mongoose = null;
+let Site = null;
 
-const Site = mongoose.model('Site', siteSchema);
-
-// ── Seed default data if collection is empty ────────────────────────────
-async function seedIfEmpty() {
-  const count = await Site.countDocuments();
-  if (count > 0) return;
-  const defaultData = {
-    hero: {
-      title: 'Move faster.',
-      highlight: 'Play smarter.',
-      description: 'A refined marketplace for the tools and access you need.',
-      image: ''
-    },
-    products: [
-      { id: 1, name: 'Roblox Executors', game: 'ROBLOX', price: 2.99, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 214, description: 'Premium Roblox executors — undetected, powerful, and easy to use. Pick your executor.', image: '' },
-      { id: 2, name: 'Roblox Scripts', game: 'ROBLOX', price: 4.99, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 300, description: 'Premium scripts for the most popular Roblox games. Pick your game to see which scripts support it.', image: '' },
-      { id: 3, name: 'Fallen Survival Account', game: 'ROBLOX', price: 1.99, currency: 'USD', stock: 'OUT OF STOCK', rating: 5, reviews: 156, description: 'Roblox accounts with access to the game Fallen Survival. Unverified, aged, multiple variants available.', image: '' },
-      { id: 4, name: 'Matcha External', game: 'ROBLOX', price: 11.97, currency: 'USD', stock: 'IN STOCK', rating: 5, reviews: 58, description: 'Premium Roblox external. Silent aim, full ESP, triggerbot and advanced visuals. Lifetime access.', image: '' },
-      { id: 5, name: 'Ignite Script', game: 'ROBLOX', price: 4.99, currency: 'USD', stock: 'IN STOCK', rating: 4.9, reviews: 321, description: 'The ultimate undetected script for Fallen Survival and Havoc. Silent Aim • Wallbang • Hitscan • ESP and much more.', image: '' },
-      { id: 6, name: 'Serversiding', game: 'ROBLOX', price: 15, currency: 'EUR', stock: 'IN STOCK', rating: 5, reviews: 132, description: 'The best web-based Roblox serverside executor. 600+ scripts straight from your browser, no download needed.', image: '' },
-      { id: 7, name: 'Xtools Roblox Multi Tool', game: 'ROBLOX', price: 19.99, currency: 'USD', stock: 'IN STOCK', rating: 4.9, reviews: 189, description: '30+ specialized tools to automate Roblox functions. No recurring fees.', image: '' },
-      { id: 8, name: 'Neverlose CS2', game: 'CS2', price: 31, currency: 'EUR', stock: 'IN STOCK', rating: 5, reviews: 48, description: 'Premium CS2 internal cheat from Neverlose. Instant key delivery, redeem with your Neverlose username.', image: '' }
-    ]
-  };
-  await Site.create(defaultData);
-  console.log('Seeded default site data into MongoDB.');
+async function initFileStore() {
+  const read = () => JSON.parse(fs.readFileSync(STORE, 'utf8'));
+  let cache = read();
+  const write = data => { fs.writeFileSync(STORE, JSON.stringify(data, null, 2), { mode: 0o600 }); cache = data; };
+  readStore = () => cache;
+  writeStore = async data => { write(data); };
+  console.log('Using file store (data/site.json).');
+  return true;
 }
 
-// ── In-memory sessions & rate‑limiting ──────────────────────────────────
+async function initMongoStore() {
+  try {
+    mongoose = require('mongoose');
+    await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
+    console.log('MongoDB connected.');
+
+    const siteSchema = new mongoose.Schema({
+      hero: {
+        title: { type: String, default: 'Move faster.' },
+        highlight: { type: String, default: 'Play smarter.' },
+        description: { type: String, default: '' },
+        image: { type: String, default: '' }
+      },
+      products: [{
+        id: Number,
+        name: String,
+        game: String,
+        price: Number,
+        currency: { type: String, enum: ['USD', 'EUR'], default: 'USD' },
+        stock: { type: String, enum: ['IN STOCK', 'OUT OF STOCK'], default: 'IN STOCK' },
+        rating: { type: Number, min: 0, max: 5, default: 5 },
+        reviews: { type: Number, default: 0 },
+        description: String,
+        image: String
+      }]
+    }, { timestamps: true });
+
+    Site = mongoose.model('Site', siteSchema);
+
+    // Seed default data if collection is empty
+    const count = await Site.countDocuments();
+    if (count === 0) {
+      const fileData = JSON.parse(fs.readFileSync(STORE, 'utf8'));
+      await Site.create(fileData);
+      console.log('Seeded MongoDB with data from site.json.');
+    }
+
+    readStore = async () => {
+      let doc = await Site.findOne();
+      if (!doc) {
+        const fileData = JSON.parse(fs.readFileSync(STORE, 'utf8'));
+        doc = await Site.create(fileData);
+      }
+      return doc.toObject();
+    };
+
+    writeStore = async data => {
+      await Site.updateOne({}, { hero: data.hero, products: data.products }, { upsert: true });
+    };
+
+    console.log('Using MongoDB store.');
+    return true;
+
+  } catch (e) {
+    if (mongoose) console.warn('MongoDB unavailable, falling back to file store:', e.message);
+    return initFileStore();
+  }
+}
+
+// ── Sessions & rate-limiting ────────────────────────────────────────────
 const sessions = new Map();
 const attempts = new Map();
 
 // ── Helpers ─────────────────────────────────────────────────────────────
-const readStore = async () => {
-  let doc = await Site.findOne();
-  if (!doc) { await seedIfEmpty(); doc = await Site.findOne(); }
-  return doc.toObject();
-};
-
-const writeStore = async (data) => {
-  await Site.updateOne({}, { hero: data.hero, products: data.products }, { upsert: true });
-};
-
 const json = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(JSON.stringify(data));
@@ -198,8 +210,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 // ── Start ───────────────────────────────────────────────────────────────
-mongoose.connection.once('open', () => {
-  seedIfEmpty().then(() => {
-    server.listen(PORT, () => console.log(`Inertia running at http://localhost:${PORT}`));
-  });
-});
+(async () => {
+  if (MONGO_URI) {
+    await initMongoStore();
+  } else {
+    await initFileStore();
+  }
+  server.listen(PORT, () => console.log(`Inertia running at http://localhost:${PORT}`));
+})();
