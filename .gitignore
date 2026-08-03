@@ -1,1 +1,31 @@
+# Dependencies
 node_modules/
+
+# PM2 / runtime logs
+logs/
+*.log
+
+# Runtime data (regenerated at runtime — not source)
+data/logs.json
+data/users.json
+data/vouches.json
+data/.auth_embed_posted
+data/.ticket_panel_posted
+
+# Uploaded media
+public/uploads/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# Local env overrides (the committed .env is intentional for this private repo;
+# these variants are ignored so machine-specific overrides never leak)
+.env.local
+.env.*.local
+
+# Leftover debug scripts
+find_bug*.js
+find_bug*.py
+find_try*.py
+find_broken_try.py
