@@ -910,11 +910,19 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// ── Start ─────────────────────────────────────────────────────────────
+
+
+// --- Start
 (async () => {
-  loadLogs();
-  loadUsers();
-  if (MONGO_URI) { await initMongoStore(); } else { await initFileStore(); }
-  addLog('system', 'server_started', { port: PORT }, '127.0.0.1', 'system');
-  server.listen(PORT, () => console.log(`Inertia running at https://inertiacheat.com:${PORT}`));
-});
+    console.log("Loading logs and users...");
+    loadLogs();
+    loadUsers();
+    
+    console.log("Initializing database store...");
+    if (MONGO_URI) { await initMongoStore(); } else { await initFileStore(); }
+    
+    addLog('system', 'server_started', { port: PORT }, '127.0.0.1', 'system');
+    
+    console.log(`Attempting to bind server to port ${PORT}...`);
+    server.listen(PORT, () => console.log(`Inertia running on port ${PORT}`));
+})();
