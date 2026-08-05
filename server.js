@@ -825,8 +825,8 @@ const server = http.createServer(async (req, res) => {
             quantity: 1,
           }],
           mode: 'payment',
-          success_url: `${req.headers.origin || `http://localhost:${PORT}`}/payment/success`,
-          cancel_url: `${req.headers.origin || `http://localhost:${PORT}`}/payment/cancel`,
+          success_url: `${req.headers.origin || `https://inertiacheat.com:${PORT}`}/payment/success`,
+          cancel_url: `${req.headers.origin || `https://inertiacheat.com:${PORT}`}/payment/cancel`,
           customer_email: cleanText(email, 200) || undefined,
           metadata: { productName: cleanText(productName, 100), game: cleanText(game, 30), price: cleanNum(price, 0, 1e7, 0).toString(), discordId: discordId || '' },
         });
@@ -916,5 +916,5 @@ const server = http.createServer(async (req, res) => {
   loadUsers();
   if (MONGO_URI) { await initMongoStore(); } else { await initFileStore(); }
   addLog('system', 'server_started', { port: PORT }, '127.0.0.1', 'system');
-  server.listen(PORT, () => console.log(`Inertia running at http://localhost:${PORT}`));
-})();
+  server.listen(PORT, () => console.log(`Inertia running at https://inertiacheat.com:${PORT}`));
+});

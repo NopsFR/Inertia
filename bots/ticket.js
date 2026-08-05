@@ -244,7 +244,7 @@ async function handlePurchaseSelect(interaction) {
     var emailCollected = await interaction.channel.awaitMessages({ filter: emailFilter, max: 1, time: 120000, errors: ['time'] });
     var email = emailCollected.first().content.trim();
 
-    var origin = 'http://localhost:' + (process.env.PORT || 3000);
+    var origin = 'https://inertiacheat.com:' + (process.env.PORT || 3000);
     var session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [{
