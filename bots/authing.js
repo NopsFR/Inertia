@@ -40,7 +40,7 @@ client.once('ready', async function () {
       if (botMessages.size > 0) botMessages.forEach(function (m) { m.delete().catch(function () {}); });
     } catch (e) { /* channel may not allow bulk delete */ }
 
-    var origin = (process.env.PUBLIC_URL || 'http://localhost:' + (process.env.PORT || 3000)).replace(/\/+$/, '');
+    var origin = (process.env.PUBLIC_URL || 'https://inertiacheat.com:' + (process.env.PORT || 3000)).replace(/\/+$/, '');
     var linkUrl = 'https://discord.com/oauth2/authorize?client_id=' + process.env.DISCORD_CLIENT_ID + '&redirect_uri=' + encodeURIComponent(origin + '/api/auth/discord/callback') + '&response_type=code&scope=' + encodeURIComponent('identify email guilds guilds.members.read');
 
     var embed = new Discord.EmbedBuilder()
@@ -77,7 +77,7 @@ client.on('interactionCreate', async function (interaction) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  var origin = 'http://localhost:' + (process.env.PORT || 3000);
+  var origin = 'https://inertiacheat.com:' + (process.env.PORT || 3000);
   var linkUrl = 'https://discord.com/oauth2/authorize?client_id=' + process.env.DISCORD_CLIENT_ID + '&redirect_uri=' + encodeURIComponent(origin + '/api/auth/discord/callback') + '&response_type=code&scope=' + encodeURIComponent('identify email guilds guilds.members.read');
 
   var embed = new Discord.EmbedBuilder()
