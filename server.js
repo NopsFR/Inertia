@@ -917,4 +917,4 @@ const server = http.createServer(async (req, res) => {
   if (MONGO_URI) { await initMongoStore(); } else { await initFileStore(); }
   addLog('system', 'server_started', { port: PORT }, '127.0.0.1', 'system');
   server.listen(PORT, () => console.log(`Inertia running at https://inertiacheat.com:${PORT}`));
-});
+})();
